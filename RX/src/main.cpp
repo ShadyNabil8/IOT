@@ -5,40 +5,30 @@
 #endif
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
+#include <BluetoothSerial.h>
 #include <WiFiClientSecure.h>
-//#include <HTTPClient.h>
 #include <UrlEncode.h>
+
 #define TOPIC_SUB "GPS"
 #define TOPIC_PUP "GPS"
 #define BZR_PIN LED_BUILTIN
-/****** WiFi Connection Details *******/
+#define MSG_BUFFER_SIZE (50)
+
 const char *ssid = "WE_E709BC";
 const char *password = "jbq0606222";
 
-/******* MQTT Broker Connection Details *******/
 const char *mqtt_server = "beb527c39d66419baeaf1c6df479bd92.s2.eu.hivemq.cloud";
 const char *mqtt_username = "MQTTapp";
 const char *mqtt_password = "MQTTapp850";
 const int mqtt_port = 8883;
 
-/******* Whatsapp Info *******/
-String phoneNumber = "201024063518";
-String apiKey = "6570645";
-
-/******** buzzer **********/
 bool buzzer_prev_status = false;
-
-/**** Secure WiFi Connectivity Initialisation *****/
-WiFiClientSecure espClient;
-
-/**** MQTT Client Initialisation Using WiFi Connection *****/
-PubSubClient client(espClient);
-
 unsigned long lastMsg = 0;
-#define MSG_BUFFER_SIZE (50)
 char msg[MSG_BUFFER_SIZE];
 
-/****** root certificate *********/
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+BluetoothSerial SerialBT;
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -74,7 +64,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
-/************* Connect to WiFi ***********/
 void setup_wifi()
 {
   delay(10);
@@ -94,16 +83,13 @@ void setup_wifi()
   Serial.println(WiFi.localIP());
 }
 
-/************* Connect to MQTT Broker ***********/
 void reconnect()
 {
-  // Loop until we're reconnected
   while (!client.connected())
   {
     Serial.print("Attempting MQTT connection...");
     String clientId = "ESP8266Client-"; // Create a random client ID
     clientId += String(random(0xffff), HEX);
-    // Attempt to connect
     if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
     {
       Serial.println("connected");
@@ -112,7 +98,7 @@ void reconnect()
     }
     else
     {
-Serial.print("failed, rc=");
+      Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds"); // Wait 5 seconds before retrying
       delay(5000);
@@ -120,10 +106,9 @@ Serial.print("failed, rc=");
   }
 }
 
-/************ Buzzer Event Handler ************/
 void Buzzer_toggle()
 {
-  if(buzzer_prev_status == false)
+  if (buzzer_prev_status == false)
   {
     digitalWrite(BZR_PIN, HIGH);
     buzzer_prev_status = true;
@@ -135,7 +120,6 @@ void Buzzer_toggle()
   }
 }
 
-/***** Call back Method for Receiving MQTT messages and Switching LED ****/
 void callback(char *topic, byte *payload, unsigned int length)
 {
   String incommingMessage = "";
@@ -146,23 +130,20 @@ void callback(char *topic, byte *payload, unsigned int length)
   StaticJsonDocument<200> msg;
   deserializeJson(msg, incommingMessage);
 
-  //--- check the incomming message
   if (strcmp(topic, TOPIC_SUB) == 0)
   {
-    // string event(msg["event"]);
     if (String((const char *)msg["event"]).equals("gps"))
     {
       Serial.print((double)msg["lat"], 8);
       Serial.println();
       Serial.print((double)msg["lng"], 8);
       Serial.println();
-      double lat = msg["lat"]; // Assuming msg is a JSON object
+      double lat = msg["lat"];
       double lng = msg["lng"];
 
-      // Convert the lat and lng to strings
-      String latStr = String(lat, 6); // Use 6 decimal places for precision
+      String latStr = String(lat, 6);
       String lngStr = String(lng, 6);
-      //sendMessage("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
+      sendMessage("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
     }
     else
     {
@@ -171,46 +152,20 @@ void callback(char *topic, byte *payload, unsigned int length)
   }
 }
 
-/**** Method for Publishing MQTT Messages **********/
 void publishMessage(const char *topic, String payload, boolean retained)
 {
   if (client.publish(topic, payload.c_str(), true))
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
 }
 
-/**** Send Mgs to Whatsapp ****/
-// void sendMessage(String message)
-// {
+void sendMessageBT(String message)
+{
+  SerialBT.write(message);
+}
 
-//   // Data to send with HTTP POST
-//   String url = "https://api.callmebot.com/whatsapp.php?phone=" + phoneNumber + "&apikey=" + apiKey + "&text=" + urlEncode(message);
-//   HTTPClient http;
-//   http.begin(url);
-
-//   // Specify content-type header
-//   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-
-//   // Send HTTP POST request
-//   int httpResponseCode = http.POST(url);
-//   if (httpResponseCode == 200)
-//   {
-//     Serial.println("Message sent successfully");
-//   }
-//   else
-//   {
-//     Serial.println("Error sending the message");
-//     Serial.println("HTTP response code: ");
-//     Serial.println(httpResponseCode);
-//   }
-
-//   // Free resources
-//   http.end();
-// }
-
-/**** Application Initialisation Function******/
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT); // set up LED
+  pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(115200);
   while (!Serial)
     delay(1);
@@ -222,9 +177,10 @@ void setup()
 #endif
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+
+  SerialBT.begin("esp32");
 }
 
-/******** Main Function *************/
 void loop()
 {
   if (!client.connected())
