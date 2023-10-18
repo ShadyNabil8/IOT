@@ -5,9 +5,13 @@
 #endif
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
+#ifndef ESP8266
 #include <BluetoothSerial.h>
+#endif
+#ifndef ESP8266
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
+#endif
 #endif
 #include <WiFiClientSecure.h>
 #include <UrlEncode.h>
@@ -33,7 +37,9 @@ char msg[MSG_BUFFER_SIZE];
 
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
+#ifndef ESP8266
 BluetoothSerial SerialBT;
+#endif
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -190,7 +196,9 @@ void setup()
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
+  #ifndef ESP8266
   SerialBT.begin("ESP32");
+  #endif
 }
 
 void loop()
