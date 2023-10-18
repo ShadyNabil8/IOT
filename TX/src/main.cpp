@@ -150,8 +150,17 @@ void callback(char *topic, byte *payload, unsigned int length)
 
 void publishMessage(const char *topic, String payload, boolean retained)
 {
-  if (client.publish(topic, payload.c_str(), true))
+  if (client.publish(topic, payload.c_str(), retained))
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
+}
+
+void IRAM_ATTR ISR_GPS()
+{
+  GPS_btn_on = true;
+}
+void IRAM_ATTR onTimer()
+{
+  timeOut = true;
 }
 
 void setup()
@@ -221,13 +230,4 @@ void loop()
 #else
   client.loop();
 #endif
-}
-
-void IRAM_ATTR ISR_GPS()
-{
-  GPS_btn_on = true;
-}
-void IRAM_ATTR onTimer()
-{
-  timeOut = true;
 }

@@ -35,6 +35,7 @@ bool buzzer_prev_status = false;
 bool buzzer_btn_on = false;
 unsigned long lastMsg = 0;
 char msg[MSG_BUFFER_SIZE];
+bool timeOut = false;
 
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
@@ -171,7 +172,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
 void publishMessage(const char *topic, String payload, boolean retained)
 {
-  if (client.publish(topic, payload.c_str(), true))
+  if (client.publish(topic, payload.c_str(), retained))
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
 }
 
@@ -180,6 +181,11 @@ void sendMessageBT(String message)
 #ifndef ESP8266
   SerialBT.write(message);
 #endif
+}
+
+void IRAM_ATTR onTimer()
+{
+  timeOut = true;
 }
 
 void setup()
@@ -239,7 +245,3 @@ void loop()
 #endif
 }
 
-void IRAM_ATTR onTimer()
-{
-  timeOut = true;
-}
