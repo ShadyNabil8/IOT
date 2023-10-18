@@ -6,12 +6,16 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <BluetoothSerial.h>
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
+#endif
 #include <WiFiClientSecure.h>
 #include <UrlEncode.h>
 
-#define TOPIC_SUB "GPS"
-#define TOPIC_PUP "GPS"
-#define BZR_PIN LED_BUILTIN
+#define TOPIC_SUB "T1"
+#define TOPIC_PUP "T2"
+#define BUZZER_BTN 19
+#define BUZZER_PIN LED_BUILTIN
 #define MSG_BUFFER_SIZE (50)
 
 const char *ssid = "WE_E709BC";
@@ -23,6 +27,7 @@ const char *mqtt_password = "MQTTapp850";
 const int mqtt_port = 8883;
 
 bool buzzer_prev_status = false;
+bool buzzer_btn_on = false;
 unsigned long lastMsg = 0;
 char msg[MSG_BUFFER_SIZE];
 
@@ -88,19 +93,18 @@ void reconnect()
   while (!client.connected())
   {
     Serial.print("Attempting MQTT connection...");
-    String clientId = "ESP8266Client-"; // Create a random client ID
+    String clientId = "ESP8266Client-";
     clientId += String(random(0xffff), HEX);
     if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
     {
       Serial.println("connected");
-
-      client.subscribe(TOPIC_SUB); // subscribe the topics here
+      client.subscribe(TOPIC_SUB);
     }
     else
     {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds"); // Wait 5 seconds before retrying
+      Serial.println(" try again in 5 seconds");
       delay(5000);
     }
   }
@@ -110,12 +114,12 @@ void Buzzer_toggle()
 {
   if (buzzer_prev_status == false)
   {
-    digitalWrite(BZR_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
     buzzer_prev_status = true;
   }
   else
   {
-    digitalWrite(BZR_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
     buzzer_prev_status = false;
   }
 }
@@ -143,7 +147,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
       String latStr = String(lat, 6);
       String lngStr = String(lng, 6);
-      sendMessage("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
+      sendMessageBT("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
     }
     else
     {
@@ -163,9 +167,17 @@ void sendMessageBT(String message)
   SerialBT.write(message);
 }
 
+void IRAM_ATTR ISR_buzzer()
+{
+  buzzer_btn_on = true;
+  Serial.println("bzr");
+}
+
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(BUZZER_BTN, INPUT_PULLUP);
+  attachInterrupt(BUZZER_BTN, ISR_buzzer, FALLING);
+  pinMode(BUZZER_PIN, OUTPUT);
   Serial.begin(115200);
   while (!Serial)
     delay(1);
@@ -178,13 +190,23 @@ void setup()
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
-  SerialBT.begin("esp32");
+  SerialBT.begin("ESP32");
 }
 
 void loop()
 {
   if (!client.connected())
-    reconnect(); // check if client is connected
+    reconnect();
   client.loop();
+
+  if (buzzer_btn_on)
+  {
+    DynamicJsonDocument msg(1024);
+    msg["event"] = "buzzer";
+    char mqtt_message[128];
+    serializeJson(msg, mqtt_message);
+    publishMessage(TOPIC_PUP, mqtt_message, true);
+    buzzer_btn_on = false;
+  }
   delay(1000);
 }

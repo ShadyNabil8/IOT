@@ -6,40 +6,32 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
-#define TOPIC_SUB "GPS"
-#define TOPIC_PUP "GPS"
-#define GPS_BTN 18
-#define BZR_BTN 19
 
-/****** WiFi Connection Details *******/
+#define TOPIC_SUB "T2"
+#define TOPIC_PUP "T1"
+#define GPS_BTN 18
+#define BUZZER_BTN 19
+#define BUZZER_PIN LED_BUILTIN
+#define MSG_BUFFER_SIZE (50)
+
 const char *ssid = "Wokwi-GUEST";
 const char *password = "";
 
-/******** Flags ********/
 bool GPS_btn_on = false;
 bool buzzer_btn_on = false;
+bool buzzer_prev_status = false;
 bool timeOut = false;
+unsigned long lastMsg = 0;
+char msg[MSG_BUFFER_SIZE];
 
-/********** Timer **********/
-hw_timer_t *My_timer = NULL;
-
-/******* MQTT Broker Connection Details *******/
 const char *mqtt_server = "beb527c39d66419baeaf1c6df479bd92.s2.eu.hivemq.cloud";
 const char *mqtt_username = "MQTTapp";
 const char *mqtt_password = "MQTTapp850";
 const int mqtt_port = 8883;
 
-/**** Secure WiFi Connectivity Initialisation *****/
 WiFiClientSecure espClient;
-
-/**** MQTT Client Initialisation Using WiFi Connection *****/
+hw_timer_t *My_timer = NULL;
 PubSubClient client(espClient);
-
-unsigned long lastMsg = 0;
-#define MSG_BUFFER_SIZE (50)
-char msg[MSG_BUFFER_SIZE];
-
-/****** root certificate *********/
 
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -75,7 +67,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
-/************* Connect to WiFi ***********/
 void setup_wifi()
 {
   delay(10);
@@ -95,51 +86,73 @@ void setup_wifi()
   Serial.println(WiFi.localIP());
 }
 
-/************* Connect to MQTT Broker ***********/
 void reconnect()
 {
-  // Loop until we're reconnected
   while (!client.connected())
   {
     Serial.print("Attempting MQTT connection...");
-    String clientId = "ESP8266Client-"; // Create a random client ID
+    String clientId = "ESP8266Client-";
     clientId += String(random(0xffff), HEX);
-    // Attempt to connect
     if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
     {
       Serial.println("connected");
 
-      client.subscribe(TOPIC_SUB); // subscribe the topics here
+      client.subscribe(TOPIC_SUB);
     }
     else
     {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds"); // Wait 5 seconds before retrying
+      Serial.println(" try again in 5 seconds");
       delay(5000);
     }
   }
 }
 
-/***** Call back Method for Receiving MQTT messages and Switching LED ****/
-void callback(char *topic, byte *payload, unsigned int length)
+void Buzzer_toggle()
 {
-  /* Code */
+  if (buzzer_prev_status == false)
+  {
+    digitalWrite(BUZZER_PIN, HIGH);
+    buzzer_prev_status = true;
+  }
+  else
+  {
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzer_prev_status = false;
+  }
 }
 
-/**** Method for Publishing MQTT Messages **********/
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  String incommingMessage = "";
+  for (unsigned int i = 0; i < length; i++)
+    incommingMessage += (char)payload[i];
+  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
+
+  StaticJsonDocument<200> msg;
+  deserializeJson(msg, incommingMessage);
+
+  if (strcmp(topic, TOPIC_SUB) == 0)
+  {
+    if (String((const char *)msg["event"]).equals("buzzer"))
+    {
+      Buzzer_toggle();
+    }
+  }
+}
+
 void publishMessage(const char *topic, String payload, boolean retained)
 {
   if (client.publish(topic, payload.c_str(), true))
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
 }
 
-/********* ISR *********/
-void IRAM_ATTR isr_GPS()
+void IRAM_ATTR ISR_GPS()
 {
   GPS_btn_on = true;
 }
-void IRAM_ATTR isr_buzzer()
+void IRAM_ATTR ISR_buzzer()
 {
   buzzer_btn_on = true;
   Serial.println("bzr");
@@ -149,16 +162,15 @@ void IRAM_ATTR onTimer()
   timeOut = true;
 }
 
-/**** Application Initialisation Function******/
 void setup()
 {
   pinMode(GPS_BTN, INPUT_PULLUP);
-  attachInterrupt(GPS_BTN, isr_GPS, FALLING);
+  attachInterrupt(GPS_BTN, ISR_GPS, FALLING);
 
-  pinMode(BZR_BTN, INPUT_PULLUP);
-  attachInterrupt(BZR_BTN, isr_buzzer, FALLING);
+  pinMode(BUZZER_BTN, INPUT_PULLUP);
+  attachInterrupt(BUZZER_BTN, ISR_buzzer, FALLING);
 
-  // pinMode(BZR_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
 
   My_timer = timerBegin(0, 80, true);
   timerAttachInterrupt(My_timer, &onTimer, true);
@@ -178,14 +190,13 @@ void setup()
   client.setCallback(callback);
 
   if (!client.connected())
-    reconnect(); // check if client is connected
+    reconnect();
 }
 
-/******** Main Function *************/
 void loop()
 {
   if (!client.connected())
-    reconnect(); // check if client is connected
+    reconnect();
   if (GPS_btn_on)
   {
     // client.loop();
