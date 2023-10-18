@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
+#include <JC_Button.h>
 
 #define TOPIC_SUB "T2"
 #define TOPIC_PUP "T1"
@@ -30,9 +31,13 @@ const char *mqtt_password = "MQTTapp850";
 const int mqtt_port = 8883;
 
 WiFiClientSecure espClient;
+#ifndef ESP8266
 hw_timer_t *My_timer = NULL;
+#endif
 PubSubClient client(espClient);
+Button buzzer_btn(BUZZER_BTN);
 
+#ifndef ESP8266
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
@@ -66,6 +71,7 @@ mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
 emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
+#endif
 
 void setup_wifi()
 {
@@ -148,35 +154,18 @@ void publishMessage(const char *topic, String payload, boolean retained)
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
 }
 
-void IRAM_ATTR ISR_GPS()
-{
-  GPS_btn_on = true;
-}
-void IRAM_ATTR ISR_buzzer()
-{
-  buzzer_btn_on = true;
-  Serial.println("bzr");
-}
-void IRAM_ATTR onTimer()
-{
-  timeOut = true;
-}
-
 void setup()
 {
   pinMode(GPS_BTN, INPUT_PULLUP);
   attachInterrupt(GPS_BTN, ISR_GPS, FALLING);
-
-  pinMode(BUZZER_BTN, INPUT_PULLUP);
-  attachInterrupt(BUZZER_BTN, ISR_buzzer, FALLING);
-
+  buzzer_btn.begin();
   pinMode(BUZZER_PIN, OUTPUT);
-
+#ifndef ESP8266
   My_timer = timerBegin(0, 80, true);
   timerAttachInterrupt(My_timer, &onTimer, true);
   timerAlarmWrite(My_timer, 1000000, true);
   timerAlarmEnable(My_timer);
-
+#endif
   Serial.begin(115200);
   while (!Serial)
     delay(1);
@@ -195,35 +184,50 @@ void setup()
 
 void loop()
 {
+  buzzer_btn.read();
   if (!client.connected())
     reconnect();
   if (GPS_btn_on)
   {
-    // client.loop();
     DynamicJsonDocument msg(1024);
     msg["event"] = "gps";
     msg["lat"] = "28.635431";
     msg["lng"] = "77.457458";
     char mqtt_message[128];
     serializeJson(msg, mqtt_message);
-    publishMessage(TOPIC_PUP, mqtt_message, true);
+    publishMessage(TOPIC_PUP, mqtt_message, false);
 
     GPS_btn_on = false;
   }
-  if (buzzer_btn_on)
+  if (buzzer_btn.pressedFor(3000))
   {
     DynamicJsonDocument msg(1024);
     msg["event"] = "buzzer";
     char mqtt_message[128];
     serializeJson(msg, mqtt_message);
-    publishMessage(TOPIC_PUP, mqtt_message, true);
-    buzzer_btn_on = false;
+    publishMessage(TOPIC_PUP, mqtt_message, false);
+    while (!buzzer_btn.wasReleased())
+    {
+      buzzer_btn.read();
+      // esp_task_wdt_reset();
+    }
   }
+#ifndef ESP8266
   if (timeOut)
   {
-    // Serial.println("timeout");
     client.loop();
     timeOut = false;
   }
-  // delay(1000);
+#else
+  client.loop();
+#endif
+}
+
+void IRAM_ATTR ISR_GPS()
+{
+  GPS_btn_on = true;
+}
+void IRAM_ATTR onTimer()
+{
+  timeOut = true;
 }

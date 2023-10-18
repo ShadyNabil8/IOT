@@ -15,6 +15,7 @@
 #endif
 #include <WiFiClientSecure.h>
 #include <UrlEncode.h>
+#include <JC_Button.h>
 
 #define TOPIC_SUB "T1"
 #define TOPIC_PUP "T2"
@@ -40,7 +41,12 @@ PubSubClient client(espClient);
 #ifndef ESP8266
 BluetoothSerial SerialBT;
 #endif
+Button buzzer_btn(BUZZER_BTN);
+#ifndef ESP8266
+hw_timer_t *My_timer = NULL;
+#endif
 
+#ifndef ESP8266
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
@@ -74,6 +80,7 @@ mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
 emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
+#endif
 
 void setup_wifi()
 {
@@ -153,7 +160,7 @@ void callback(char *topic, byte *payload, unsigned int length)
 
       String latStr = String(lat, 6);
       String lngStr = String(lng, 6);
-      sendMessageBT("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
+      // sendMessageBT("https://www.google.com/maps/search/?api=1&query=" + latStr + "," + lngStr);
     }
     else
     {
@@ -170,19 +177,14 @@ void publishMessage(const char *topic, String payload, boolean retained)
 
 void sendMessageBT(String message)
 {
+#ifndef ESP8266
   SerialBT.write(message);
-}
-
-void IRAM_ATTR ISR_buzzer()
-{
-  buzzer_btn_on = true;
-  Serial.println("bzr");
+#endif
 }
 
 void setup()
 {
-  pinMode(BUZZER_BTN, INPUT_PULLUP);
-  attachInterrupt(BUZZER_BTN, ISR_buzzer, FALLING);
+  buzzer_btn.begin();
   pinMode(BUZZER_PIN, OUTPUT);
   Serial.begin(115200);
   while (!Serial)
@@ -196,25 +198,48 @@ void setup()
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
-  #ifndef ESP8266
+#ifndef ESP8266
+  My_timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(My_timer, &onTimer, true);
+  timerAlarmWrite(My_timer, 1000000, true);
+  timerAlarmEnable(My_timer);
+#endif
+
+#ifndef ESP8266
   SerialBT.begin("ESP32");
-  #endif
+#endif
 }
 
 void loop()
 {
+  buzzer_btn.read();
   if (!client.connected())
     reconnect();
-  client.loop();
-
-  if (buzzer_btn_on)
+  if (buzzer_btn.pressedFor(3000))
   {
     DynamicJsonDocument msg(1024);
     msg["event"] = "buzzer";
     char mqtt_message[128];
     serializeJson(msg, mqtt_message);
-    publishMessage(TOPIC_PUP, mqtt_message, true);
-    buzzer_btn_on = false;
+    publishMessage(TOPIC_PUP, mqtt_message, false);
+    while (!buzzer_btn.wasReleased())
+    {
+      buzzer_btn.read();
+      // esp_task_wdt_reset();
+    }
   }
-  delay(1000);
+#ifndef ESP8266
+  if (timeOut)
+  {
+    client.loop();
+    timeOut = false;
+  }
+#else
+  client.loop();
+#endif
+}
+
+void IRAM_ATTR onTimer()
+{
+  timeOut = true;
 }
