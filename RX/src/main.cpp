@@ -179,7 +179,7 @@ void publishMessage(const char *topic, String payload, boolean retained)
 void sendMessageBT(String message)
 {
 #ifndef ESP8266
-  SerialBT.write(message);
+  SerialBT.println(message);
 #endif
 }
 
